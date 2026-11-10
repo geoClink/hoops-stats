@@ -1,6 +1,6 @@
 // Local runner for Hoops Stats.
-//   node server.js                      -> uses a built-in database stored in ./data (no setup needed)
-//   DATABASE_URL=postgres://... node server.js -> uses that Postgres (e.g. your Neon database)
+//   node local-server.js                      -> uses a built-in database stored in ./data (no setup needed)
+//   DATABASE_URL=postgres://... node local-server.js -> uses that Postgres (e.g. your Neon database)
 // On Vercel this file is not used; api/index.js handles /api and public/ is served as static files.
 const http = require('node:http');
 const fs = require('node:fs');
@@ -22,7 +22,7 @@ async function localDb() {
   };
 }
 
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png' };
 function serveStatic(req, res, url) {
   let file = path.normalize(path.join(PUBLIC, decodeURIComponent(url.pathname)));
   if (!file.startsWith(PUBLIC)) { res.writeHead(403); return res.end(); }

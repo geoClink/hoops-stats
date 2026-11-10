@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "description": "Basketball team stats with logins, progress charts and printable reports",
   "scripts": {
-    "start": "node server.js"
+    "start": "node local-server.js"
   },
   "engines": {
     "node": ">=22"

@@ -39,7 +39,7 @@ Each game also has a printable box score. Next season: Settings → Start a new 
 
 ## Files
 
-- `public/` — the web pages (served as static files)
+- `public/` — the web pages (served as static files; page script is `main.js`)
 - `lib/api.js` — logins and data API (shared)
 - `api/index.js` — the Vercel function that runs the API
-- `server.js` — local runner
+- `local-server.js` — local runner

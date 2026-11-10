@@ -24,6 +24,58 @@ const fmtTime = t => t ? new Date(`2000-01-01T${t}`).toLocaleTimeString(undefine
 const isPlayed = g => g.team_score != null || state.data.stats.some(s => s.game_id === g.id);
 const playedGames = () => state.data.games.filter(isPlayed);
 const playerLabel = p => (p.number !== '' ? `#${p.number} ` : '') + p.name;
+const todayStr = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
+
+// ---------- attendance ----------
+// Who was at a game: the attendance list if one was taken, otherwise anyone with stats.
+function presentAtGame(g, pid) {
+  const rows = state.data.game_attendance.filter(a => a.game_id === g.id);
+  return rows.length ? rows.some(a => a.player_id === pid) : state.data.stats.some(s => s.game_id === g.id && s.player_id === pid);
+}
+function attendance(pid) {
+  const games = playedGames(), past = state.data.practices.filter(pr => pr.date <= todayStr());
+  return {
+    gHere: games.filter(g => presentAtGame(g, pid)).length, gTotal: games.length,
+    pHere: past.filter(pr => state.data.practice_attendance.some(a => a.practice_id === pr.id && a.player_id === pid)).length,
+    pTotal: past.length,
+  };
+}
+const attText = (here, total) => total ? `${here}/${total}` : '–';
+
+// ---------- badges ----------
+// Milestones a player earned this season, oldest first. Worked out from the stats; nothing extra is stored.
+function badges(pid) {
+  const out = [], best = { pts: 0, reb: 0, ast: 0, stl: 0, blk: 0 };
+  const names = { pts: 'points', reb: 'rebounds', ast: 'assists', stl: 'steals', blk: 'blocks' };
+  let basket = false, three = false, ft = false, season = 0;
+  playerLines(pid).forEach((l, i) => {
+    const when = `${fmtDate(l.game.date)} vs ${l.game.opponent || 'Opponent'}`;
+    const add = (title, kind) => out.push({ title, when, kind });
+    if (!basket && l.fg2m + l.fg3m > 0) { basket = true; add('First basket!', 'first'); }
+    if (!three && l.fg3m > 0) { three = true; add('First 3-pointer!', 'first'); }
+    if (!ft && l.ftm > 0) { ft = true; add('First free throw!', 'first'); }
+    for (const k of Object.keys(best)) {
+      if (i > 0 && l[k] > best[k] && l[k] >= 2) add(`Season high: ${l[k]} ${names[k]}`, 'high');
+      best[k] = Math.max(best[k], l[k]);
+    }
+    if (l.pts >= 10) add(`Double digits: ${l.pts} points`, 'big');
+    if (l.reb >= 8) add(`${l.reb} rebounds in a game`, 'big');
+    if (l.ast >= 5) add(`${l.ast} assists in a game`, 'big');
+    if (l.stl >= 5) add(`${l.stl} steals in a game`, 'big');
+    if (l.blk >= 3) add(`${l.blk} blocks in a game`, 'big');
+    const before = season; season += l.pts;
+    for (const m of [25, 50, 100, 150, 200]) if (before < m && season >= m) add(`${m} points this season`, 'total');
+  });
+  const a = attendance(pid);
+  if (a.pTotal >= 5 && a.pHere === a.pTotal) out.push({ title: 'Never missed a practice', when: `${a.pTotal} practices`, kind: 'team' });
+  return out;
+}
+function badgeList(pid, max) {
+  const all = badges(pid).reverse();
+  if (!all.length) return '<p class="muted small">Badges appear here as milestones happen: first basket, season highs and more.</p>';
+  return `<div class="badges">${all.slice(0, max || all.length).map(b => `<div class="badge badge-${b.kind}"><span class="medal" aria-hidden="true"></span>
+    <div><b>${esc(b.title)}</b><small>${esc(b.when)}</small></div></div>`).join('')}</div>`;
+}
 
 async function api(path, opts = {}) {
   const res = await fetch('/api' + path, {
@@ -148,7 +200,7 @@ function viewSeason() {
   const games = playedGames();
   const upcoming = state.data.games.filter(g => !isPlayed(g));
   const rec = games.reduce((r, g) => { const x = result(g); if (x) r[x]++; return r; }, { W: 0, L: 0, T: 0 });
-  const rows = players.map(p => ({ p, t: totals(playerLines(p.id)) }));
+  const rows = players.map(p => ({ p, t: totals(playerLines(p.id)), a: attendance(p.id) }));
   const gameRow = g => {
     const r = result(g);
     return `<a class="game-row" href="#/game/${g.id}"><span class="date">${fmtDate(g.date)}${g.time ? `<small>${fmtTime(g.time)}</small>` : ''}</span>
@@ -172,12 +224,13 @@ function viewSeason() {
 
   <h2>Player season stats <span class="muted small">— click a player to see their progress</span></h2>
   <div class="table-wrap"><table class="stats">
-    <thead><tr><th class="left">Player</th><th title="Games played">GP</th><th>PTS</th><th>PPG</th><th>REB</th><th>RPG</th><th>AST</th><th>STL</th><th>BLK</th><th>TO</th><th>PF</th><th>FG%</th><th>3P%</th><th>FT%</th></tr></thead>
-    <tbody>${rows.map(({ p, t }) => `<tr>
+    <thead><tr><th class="left">Player</th><th title="Games played">GP</th><th>PTS</th><th>PPG</th><th>REB</th><th>RPG</th><th>AST</th><th>STL</th><th>BLK</th><th>TO</th><th>PF</th><th>FG%</th><th>3P%</th><th>FT%</th><th title="Games attended">Att.</th><th title="Practices attended">Prac.</th></tr></thead>
+    <tbody>${rows.map(({ p, t, a }) => `<tr>
       <td class="left"><a href="#/player/${p.id}">${esc(playerLabel(p))}</a></td><td>${t.gp}</td><td><strong>${t.pts}</strong></td><td>${avg(t.pts, t.gp)}</td>
       <td>${t.reb}</td><td>${avg(t.reb, t.gp)}</td><td>${t.ast}</td><td>${t.stl}</td><td>${t.blk}</td><td>${t.tov}</td><td>${t.pf}</td>
-      <td>${pct(t.fgm, t.fga)}</td><td>${pct(t.fg3m, t.fg3a)}</td><td>${pct(t.ftm, t.fta)}</td></tr>`).join('') ||
-      `<tr><td colspan="14" class="muted">No players yet. ${isAdmin() ? '<a href="#/settings">Add players</a>' : ''}</td></tr>`}</tbody>
+      <td>${pct(t.fgm, t.fga)}</td><td>${pct(t.fg3m, t.fg3a)}</td><td>${pct(t.ftm, t.fta)}</td>
+      <td>${attText(a.gHere, a.gTotal)}</td><td>${attText(a.pHere, a.pTotal)}</td></tr>`).join('') ||
+      `<tr><td colspan="16" class="muted">No players yet. ${isAdmin() ? '<a href="#/settings">Add players</a>' : ''}</td></tr>`}</tbody>
   </table></div>
 
   <h2>Schedule</h2>
@@ -190,8 +243,28 @@ function viewSeason() {
   <div class="games">${upcoming.map(gameRow).join('') || '<p class="muted">No upcoming games on the schedule.</p>'}</div>
 
   <h2>Results</h2>
-  <div class="games">${games.slice().reverse().map(gameRow).join('') || '<p class="muted">No games played yet.</p>'}</div>`;
+  <div class="games">${games.slice().reverse().map(gameRow).join('') || '<p class="muted">No games played yet.</p>'}</div>
+
+  <h2>Practices</h2>
+  ${isAdmin() ? `<form id="addPractice" class="inline card">
+    <label>Date <input type="date" name="date" value="${todayStr()}" required></label>
+    <label>Time <input type="time" name="time"></label>
+    <button class="primary">Add practice &amp; take attendance</button>
+  </form>` : ''}
+  <div class="games">${state.data.practices.slice().reverse().map(pr => {
+    const n = state.data.practice_attendance.filter(a => a.practice_id === pr.id).length;
+    return `<a class="game-row" href="#/practice/${pr.id}"><span class="date">${fmtDate(pr.date)}${pr.time ? `<small>${fmtTime(pr.time)}</small>` : ''}</span>
+      <span class="opp">Practice</span><span class="score">${n ? `${n} of ${players.length} here` : pr.date > todayStr() ? '<span class="tag">Upcoming</span>' : 'No attendance yet'}</span></a>`;
+  }).join('') || '<p class="muted">No practices yet.</p>'}</div>`;
   bindSeasonPicker();
+  const addPr = document.getElementById('addPractice');
+  if (addPr) addPr.onsubmit = async e => {
+    e.preventDefault();
+    try {
+      const r = await api('/practices', { method: 'POST', body: { ...formData(addPr), season_id: state.seasonId, present: [] } });
+      await loadSeason(); location.hash = `#/practice/${r.id}`;
+    } catch (err) { toast(err.message, true); }
+  };
   const sched = document.getElementById('schedule');
   if (sched) sched.onsubmit = async e => {
     e.preventDefault();
@@ -222,8 +295,8 @@ function viewGame(id) {
   $app.innerHTML = `
   <div class="page-head">
     <div><a href="#/" class="back">← Season</a><h1>${id === 'new' ? 'Enter a game' : noStatsYet ? `Enter stats: vs ${esc(g.opponent || 'Opponent')}` : 'Edit game'}</h1>
-    <p class="muted">Copy the numbers from the paper stat sheet. Uncheck “Played” for anyone who sat out.</p></div>
-    <div class="actions">${id !== 'new' ? `<a class="button" href="#/box/${g.id}">Print box score</a>` : ''}</div>
+    <p class="muted">Copy the numbers from the paper stat sheet. “Here” is attendance; uncheck “Played” for anyone who came but sat out.</p></div>
+    <div class="actions">${id !== 'new' ? `<a class="button primary" href="#/live/${g.id}">Live entry (phone)</a><a class="button" href="#/box/${g.id}">Print box score</a>` : ''}</div>
   </div>
   <form id="game">
     <div class="game-info">
@@ -234,17 +307,20 @@ function viewGame(id) {
       <label>Their score <input type="number" min="0" name="opp_score" value="${g.opp_score ?? ''}" class="num"></label>
     </div>
     <div class="table-wrap"><table class="entry">
-      <thead><tr><th class="left">Player</th><th>Played</th>${STATS.map(([k, s, t]) => `<th title="${t}">${s}</th>`).join('')}<th>PTS</th></tr></thead>
+      <thead><tr><th class="left">Player</th><th>Here</th><th>Played</th>${STATS.map(([k, s, t]) => `<th title="${t}">${s}</th>`).join('')}<th>PTS</th></tr></thead>
       <tbody>${players.map(p => {
         const l = lineFor(p.id);
         const played = noStatsYet || !!l;
+        const att = state.data.game_attendance.filter(a => a.game_id === g.id);
+        const here = att.length ? att.some(a => a.player_id === p.id) : played;
         return `<tr data-pid="${p.id}" class="${played ? '' : 'dnp'}">
           <td class="left">${esc(playerLabel(p))}</td>
+          <td><input type="checkbox" class="here" ${here ? 'checked' : ''} aria-label="${esc(p.name)} was here"></td>
           <td><input type="checkbox" class="played" ${played ? 'checked' : ''} aria-label="${esc(p.name)} played"></td>
           ${STATS.map(([k, s]) => `<td><input type="number" min="0" max="99" inputmode="numeric" data-k="${k}" value="${l ? l[k] : ''}" placeholder="0" aria-label="${esc(p.name)} ${s}"></td>`).join('')}
           <td class="pts-cell">${l ? pts(l) : 0}</td></tr>`;
-      }).join('') || `<tr><td colspan="15" class="muted">Add players in Settings first.</td></tr>`}</tbody>
-      <tfoot><tr><td class="left">Team</td><td></td>${STATS.map(([k]) => `<td data-total="${k}"></td>`).join('')}<td data-total="pts"></td></tr></tfoot>
+      }).join('') || `<tr><td colspan="16" class="muted">Add players in Settings first.</td></tr>`}</tbody>
+      <tfoot><tr><td class="left">Team</td><td></td><td></td>${STATS.map(([k]) => `<td data-total="${k}"></td>`).join('')}<td data-total="pts"></td></tr></tfoot>
     </table></div>
     <p class="warn" id="scoreCheck"></p>
     <label>Notes <textarea name="notes" rows="2" placeholder="Anything worth remembering about this game">${esc(g.notes)}</textarea></label>
@@ -258,7 +334,10 @@ function viewGame(id) {
   const recalc = () => {
     const tot = Object.fromEntries(STATS.map(([k]) => [k, 0])); tot.pts = 0;
     form.querySelectorAll('tbody tr[data-pid]').forEach(tr => {
-      const on = tr.querySelector('.played').checked;
+      const playedBox = tr.querySelector('.played');
+      playedBox.disabled = !tr.querySelector('.here').checked;
+      if (playedBox.disabled) playedBox.checked = false;
+      const on = playedBox.checked;
       tr.classList.toggle('dnp', !on);
       const v = k => Number(tr.querySelector(`[data-k="${k}"]`).value) || 0;
       const p = 2 * v('fg2m') + 3 * v('fg3m') + v('ftm');
@@ -289,8 +368,9 @@ function viewGame(id) {
 
   form.onsubmit = async e => {
     e.preventDefault();
-    const body = { ...formData(form), season_id: state.seasonId, lines: [] };
+    const body = { ...formData(form), season_id: state.seasonId, lines: [], present: [] };
     form.querySelectorAll('tbody tr[data-pid]').forEach(tr => {
+      if (tr.querySelector('.here').checked) body.present.push(Number(tr.dataset.pid));
       if (!tr.querySelector('.played').checked) return;
       const line = { player_id: Number(tr.dataset.pid) };
       STATS.forEach(([k]) => line[k] = Number(tr.querySelector(`[data-k="${k}"]`).value) || 0);
@@ -349,6 +429,7 @@ function playerSection(p, { compact = false } = {}) {
     return `<tr><td class="left">${r.label}</td><td>${fmt(r.early, r.isPct)}</td><td>${fmt(r.late, r.isPct)}</td><td class="${cls}">${arrow}</td></tr>`;
   }).join('') : '';
   const half = Math.floor(lines.length / 2);
+  const att = attendance(p.id);
 
   return `
   <div class="tiles small-tiles">
@@ -358,7 +439,10 @@ function playerSection(p, { compact = false } = {}) {
     <div class="tile"><span class="tile-label">Assists</span><strong>${t.ast}</strong><span class="muted">${avg(t.ast, t.gp)} per game</span></div>
     <div class="tile"><span class="tile-label">Steals</span><strong>${t.stl}</strong><span class="muted">${avg(t.stl, t.gp)} per game</span></div>
     <div class="tile"><span class="tile-label">Shooting</span><strong>${pct(t.fgm, t.fga)}</strong><span class="muted">FT ${pct(t.ftm, t.fta)}</span></div>
+    <div class="tile"><span class="tile-label">Attendance</span><strong>${attText(att.gHere, att.gTotal)}</strong><span class="muted">games · ${attText(att.pHere, att.pTotal)} practices</span></div>
   </div>
+  <h3>Badges</h3>
+  ${badgeList(p.id, compact ? 8 : 0)}
   <div class="two-col">
     <div>${compact ? lineChart(lines.map(l => l.pts), labels, { title: 'Points per game', height: 160 })
       : `<div class="no-print chart-pick">${TRACK.map(([k, l], i) => `<button type="button" class="chip ${i ? '' : 'on'}" data-k="${k}">${l}</button>`).join('')}</div>
@@ -417,9 +501,10 @@ function viewReport() {
       <div class="tile"><span class="tile-label">Team rebounds</span><strong>${team.reb}</strong><span class="muted">${avg(team.reb, games.length)} per game</span></div>
     </div>
     <h2>Player totals</h2>
-    <table class="stats"><thead><tr><th class="left">Player</th><th>GP</th><th>PTS</th><th>PPG</th><th>REB</th><th>AST</th><th>STL</th><th>BLK</th><th>TO</th><th>FG%</th><th>FT%</th></tr></thead>
+    <table class="stats"><thead><tr><th class="left">Player</th><th>GP</th><th>PTS</th><th>PPG</th><th>REB</th><th>AST</th><th>STL</th><th>BLK</th><th>TO</th><th>FG%</th><th>FT%</th><th>Games here</th><th>Practices</th></tr></thead>
     <tbody>${rows.map(({ p, t }) => `<tr><td class="left">${esc(playerLabel(p))}</td><td>${t.gp}</td><td><strong>${t.pts}</strong></td><td>${avg(t.pts, t.gp)}</td>
-      <td>${t.reb}</td><td>${t.ast}</td><td>${t.stl}</td><td>${t.blk}</td><td>${t.tov}</td><td>${pct(t.fgm, t.fga)}</td><td>${pct(t.ftm, t.fta)}</td></tr>`).join('')}</tbody></table>
+      <td>${t.reb}</td><td>${t.ast}</td><td>${t.stl}</td><td>${t.blk}</td><td>${t.tov}</td><td>${pct(t.fgm, t.fga)}</td><td>${pct(t.ftm, t.fta)}</td>
+      ${(a => `<td>${attText(a.gHere, a.gTotal)}</td><td>${attText(a.pHere, a.pTotal)}</td>`)(attendance(p.id))}</tr>`).join('')}</tbody></table>
     <h2>Results</h2>
     <table class="stats"><thead><tr><th class="left">Date</th><th class="left">Opponent</th><th>Result</th><th>Score</th></tr></thead>
     <tbody>${games.map(g => `<tr><td class="left">${fmtDate(g.date)}${g.time ? ' · ' + fmtTime(g.time) : ''}</td><td class="left">${esc(g.opponent)}</td><td>${result(g) || '–'}</td>
@@ -515,6 +600,195 @@ async function viewSettings() {
   });
 }
 
+// ---------- live (phone) stat entry ----------
+// One player at a time with big buttons. Every tap is kept on the phone first,
+// then saved to the server a moment later, so a weak gym signal doesn't lose stats.
+const LIVE_STATS = [['reb', 'Rebound'], ['ast', 'Assist'], ['stl', 'Steal'], ['blk', 'Block'], ['tov', 'Turnover'], ['pf', 'Foul']];
+const liveTimers = {};
+window.addEventListener('online', () => window.liveRetry?.());
+
+function viewLive(id) {
+  if (!state.data) return noSeason();
+  const g = state.data.games.find(x => x.id === Number(id));
+  if (!g || !isAdmin()) { location.hash = g ? `#/game/${g.id}` : '#/'; return; }
+  const { players } = state.data;
+  const key = 'hoops-live-' + g.id;
+  const empty = () => Object.fromEntries(STATS.map(([k]) => [k, 0]));
+  let s = JSON.parse(localStorage.getItem(key) || 'null');
+  if (!s || !s.dirty) { // nothing unsaved on this phone: start from what the server has
+    const statRows = state.data.stats.filter(x => x.game_id === g.id);
+    const att = state.data.game_attendance.filter(a => a.game_id === g.id).map(a => a.player_id);
+    const present = att.length ? att : statRows.map(x => x.player_id);
+    s = { present, lines: {}, opp: g.opp_score ?? 0, sel: null, undo: [], phase: present.length ? 'play' : 'roster', dirty: false };
+    statRows.forEach(r => { s.lines[r.player_id] = Object.fromEntries(STATS.map(([k]) => [k, r[k]])); });
+  }
+  players.forEach(p => { s.lines[p.id] ??= empty(); });
+  s.present = s.present.filter(pid => players.some(p => p.id === pid));
+  if (!s.present.includes(s.sel)) s.sel = s.present[0] ?? null;
+  let status = s.dirty ? 'Not saved yet' : 'All saved';
+  navigator.wakeLock?.request('screen').catch(() => {}); // keep the screen on during the game
+
+  const persist = () => localStorage.setItem(key, JSON.stringify(s));
+  const teamPts = () => s.present.reduce((t, pid) => t + pts(s.lines[pid]), 0);
+  const first = pid => players.find(p => p.id === pid)?.name.split(' ')[0] || '';
+
+  async function save() {
+    clearTimeout(liveTimers[key]);
+    const body = {
+      date: g.date, time: g.time, opponent: g.opponent, notes: g.notes, team_score: teamPts(), opp_score: s.opp,
+      present: s.present, lines: s.present.map(pid => ({ player_id: pid, ...s.lines[pid] })),
+    };
+    try {
+      await api(`/games/${g.id}`, { method: 'PUT', body });
+      s.dirty = false; persist(); status = 'All saved';
+      loadSeason().catch(() => {});
+    } catch {
+      status = 'No signal: kept on this phone, retrying';
+      liveTimers[key] = setTimeout(save, 5000);
+    }
+    paintStatus();
+    return !s.dirty;
+  }
+  window.liveRetry = () => { if (s.dirty) save(); };
+  function change() {
+    s.dirty = true; status = 'Saving…'; persist();
+    clearTimeout(liveTimers[key]); liveTimers[key] = setTimeout(save, 700);
+    if (navigator.userActivation?.hasBeenActive) navigator.vibrate?.(12);
+    render();
+  }
+  function apply(entry, sign) {
+    if (entry.opp) s.opp = Math.max(0, s.opp + sign * entry.opp);
+    for (const [k, n] of Object.entries(entry.diff || {})) s.lines[entry.pid][k] = Math.max(0, s.lines[entry.pid][k] + sign * n);
+  }
+  function record(entry) { apply(entry, 1); s.undo.push(entry); if (s.undo.length > 60) s.undo.shift(); change(); }
+  function paintStatus() {
+    const el = document.getElementById('liveStatus');
+    if (el) { el.textContent = status; el.className = 'live-status' + (status.startsWith('No signal') ? ' bad' : status === 'All saved' ? ' ok' : ''); }
+  }
+
+  function render() {
+    if (location.hash !== `#/live/${g.id}`) return;
+    const top = `<div class="live-top"><a href="#/game/${g.id}" class="back">← Game</a><span id="liveStatus"></span></div>`;
+    if (s.phase === 'roster') {
+      $app.innerHTML = `<div class="live">${top}
+        <h1>Who's here?</h1>
+        <p class="muted">vs ${esc(g.opponent || 'Opponent')} · ${fmtDate(g.date)}${g.time ? ' · ' + fmtTime(g.time) : ''}</p>
+        <div class="roster-pick">${players.map(p => `<button type="button" class="pick ${s.present.includes(p.id) ? 'on' : ''}" data-pid="${p.id}">${esc(playerLabel(p))}</button>`).join('')}</div>
+        <div class="live-actions">
+          <button type="button" id="allHere">Everyone's here</button>
+          <button type="button" class="primary" id="start" ${s.present.length ? '' : 'disabled'}>Start stats (${s.present.length} here)</button>
+        </div></div>`;
+      $app.querySelectorAll('.pick').forEach(b => b.onclick = () => {
+        const pid = Number(b.dataset.pid);
+        s.present = s.present.includes(pid) ? s.present.filter(x => x !== pid) : players.map(p => p.id).filter(x => x === pid || s.present.includes(x));
+        change();
+      });
+      document.getElementById('allHere').onclick = () => { s.present = players.map(p => p.id); change(); };
+      document.getElementById('start').onclick = () => { s.phase = 'play'; s.sel = s.present.includes(s.sel) ? s.sel : s.present[0]; persist(); render(); };
+      return paintStatus();
+    }
+    const sel = players.find(p => p.id === s.sel), l = s.lines[s.sel];
+    const last = s.undo[s.undo.length - 1];
+    $app.innerHTML = `<div class="live">${top}
+      <div class="scoreboard">
+        <div class="side"><span>${esc(state.data.season.team || 'Us')}</span><b>${teamPts()}</b></div>
+        <div class="side"><span>${esc(g.opponent || 'Them')}</span><b>${s.opp}</b>
+          <div class="opp-btns">${[1, 2, 3].map(n => `<button type="button" data-opp="${n}">+${n}</button>`).join('')}<button type="button" data-opp="-1">−1</button></div></div>
+      </div>
+      <div class="chips-row">${s.present.map(pid => {
+        const p = players.find(x => x.id === pid);
+        return `<button type="button" class="pchip ${pid === s.sel ? 'on' : ''}" data-sel="${pid}">${p.number !== '' ? `<b>#${esc(p.number)}</b> ` : ''}${esc(first(pid))}<small>${pts(s.lines[pid])} pts</small></button>`;
+      }).join('')}</div>
+      ${sel ? `<div class="live-player">
+        <h2>${esc(playerLabel(sel))}</h2>
+        <p class="line"><b>${pts(l)} PTS</b> · ${l.reb} REB · ${l.ast} AST · ${l.stl} STL · ${l.blk} BLK · ${l.tov} TO · ${l.pf} PF<br>
+          FG ${l.fg2m + l.fg3m}-${l.fg2a + l.fg3a} · 3PT ${l.fg3m}-${l.fg3a} · FT ${l.ftm}-${l.fta}</p>
+        <div class="shot-grid">${[['fg2', '2 pts'], ['fg3', '3 pts'], ['ft', 'Free throw']].map(([k, label]) =>
+          `<button type="button" class="made" data-shot="${k}" data-made="1">${label}<small>Made</small></button>
+           <button type="button" class="miss" data-shot="${k}" data-made="0">${label}<small>Missed</small></button>`).join('')}</div>
+        <div class="stat-grid">${LIVE_STATS.map(([k, label]) => `<button type="button" data-stat="${k}">${label}<small>${l[k]}</small></button>`).join('')}</div>
+      </div>` : '<p class="muted">Pick who\'s here first.</p>'}
+      <div class="live-actions">
+        <button type="button" id="undo" ${last ? '' : 'disabled'}>Undo${last ? `: ${esc(last.label)}` : ''}</button>
+        <button type="button" id="roster">Who's here</button>
+        <button type="button" class="primary" id="done">Done</button>
+      </div></div>`;
+    $app.querySelectorAll('[data-sel]').forEach(b => b.onclick = () => { s.sel = Number(b.dataset.sel); persist(); render(); });
+    $app.querySelectorAll('[data-shot]').forEach(b => b.onclick = () => {
+      const k = b.dataset.shot, made = b.dataset.made === '1';
+      const diff = { [k + 'a']: 1 }; if (made) diff[k + 'm'] = 1;
+      const what = { fg2: '2', fg3: '3', ft: 'FT' }[k];
+      record({ pid: s.sel, diff, label: `${first(s.sel)} ${what} ${made ? 'made' : 'missed'}` });
+    });
+    $app.querySelectorAll('[data-stat]').forEach(b => b.onclick = () =>
+      record({ pid: s.sel, diff: { [b.dataset.stat]: 1 }, label: `${first(s.sel)} ${b.textContent.replace(/\d+$/, '').trim().toLowerCase()}` }));
+    $app.querySelectorAll('[data-opp]').forEach(b => b.onclick = () => {
+      const n = Number(b.dataset.opp);
+      if (n < 0 && s.opp === 0) return;
+      record({ opp: n, label: `${g.opponent || 'Them'} ${n > 0 ? '+' + n : n}` });
+    });
+    document.getElementById('undo').onclick = () => { const e = s.undo.pop(); if (e) { apply(e, -1); change(); } };
+    document.getElementById('roster').onclick = () => { s.phase = 'roster'; persist(); render(); };
+    document.getElementById('done').onclick = async () => {
+      if (s.dirty && !(await save())) return toast('Not saved yet: no signal. Your stats are safe on this phone.', true);
+      localStorage.removeItem(key);
+      await loadSeason(); location.hash = `#/box/${g.id}`;
+    };
+    paintStatus();
+  }
+  render();
+  if (s.dirty) save();
+}
+
+// ---------- practices ----------
+function viewPractice(id) {
+  if (!state.data) return noSeason();
+  const { players, practices, practice_attendance } = state.data;
+  const pr = practices.find(x => x.id === Number(id));
+  if (!pr) { $app.innerHTML = '<p>Practice not found.</p>'; return; }
+  const here = new Set(practice_attendance.filter(a => a.practice_id === pr.id).map(a => a.player_id));
+  const head = `<a href="#/" class="back">← Season</a><h1>Practice</h1>
+    <p class="muted">${longDate(pr.date)}${pr.time ? ' · ' + fmtTime(pr.time) : ''}</p>`;
+  if (!isAdmin()) {
+    $app.innerHTML = `<div class="page-head"><div>${head}</div></div>
+      <div class="roster-pick">${players.map(p => `<span class="pick ${here.has(p.id) ? 'on' : ''}">${esc(playerLabel(p))}${here.has(p.id) ? '' : ' (absent)'}</span>`).join('')}</div>
+      ${pr.notes ? `<p class="notes">${esc(pr.notes)}</p>` : ''}`;
+    return;
+  }
+  $app.innerHTML = `<div class="page-head"><div>${head}</div></div>
+  <form id="practice">
+    <div class="game-info">
+      <label>Date <input type="date" name="date" value="${esc(pr.date)}" required></label>
+      <label>Time <input type="time" name="time" value="${esc(pr.time)}"></label>
+    </div>
+    <h2>Who came? <span class="muted small" id="hereCount"></span></h2>
+    <div class="roster-pick">${players.map(p => `<button type="button" class="pick ${here.has(p.id) ? 'on' : ''}" data-pid="${p.id}">${esc(playerLabel(p))}</button>`).join('')}</div>
+    <p><button type="button" class="link" id="allHere">Everyone was here</button></p>
+    <label>Notes <textarea name="notes" rows="2" placeholder="What you worked on">${esc(pr.notes)}</textarea></label>
+    <div class="form-actions"><button class="primary">Save attendance</button><button type="button" class="danger" id="delPractice">Delete practice</button></div>
+  </form>`;
+  const count = () => document.getElementById('hereCount').textContent = `${here.size} of ${players.length}`;
+  const form = document.getElementById('practice');
+  form.querySelectorAll('.pick').forEach(b => b.onclick = () => {
+    const pid = Number(b.dataset.pid);
+    here.has(pid) ? here.delete(pid) : here.add(pid);
+    b.classList.toggle('on', here.has(pid)); count();
+  });
+  document.getElementById('allHere').onclick = () => { players.forEach(p => here.add(p.id)); form.querySelectorAll('.pick').forEach(b => b.classList.add('on')); count(); };
+  count();
+  form.onsubmit = async e => {
+    e.preventDefault();
+    try {
+      await api(`/practices/${pr.id}`, { method: 'PUT', body: { ...formData(form), present: [...here] } });
+      await loadSeason(); toast('Attendance saved'); location.hash = '#/';
+    } catch (err) { toast(err.message, true); }
+  };
+  document.getElementById('delPractice').onclick = async () => {
+    if (!confirm('Delete this practice and its attendance?')) return;
+    await api(`/practices/${pr.id}`, { method: 'DELETE' }); await loadSeason(); toast('Practice deleted'); location.hash = '#/';
+  };
+}
+
 // ---------- boot & routing ----------
 async function loadSeasons() {
   state.seasons = await api('/seasons');
@@ -546,6 +820,8 @@ function route() {
     return viewBoxScore(g, state.data.season, state.data.players, pid => state.data.stats.find(s => s.game_id === g.id && s.player_id === pid));
   }
   if (page === 'player') return viewPlayer(id);
+  if (page === 'live') return viewLive(id);
+  if (page === 'practice') return viewPractice(id);
   if (page === 'report') return viewReport();
   if (page === 'settings') return viewSettings();
   viewSeason();

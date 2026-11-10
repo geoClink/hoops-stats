@@ -32,8 +32,10 @@ Then open http://localhost:3000. With no settings it uses a built-in database sa
 1. **Settings** → name the season and team, add players (name + jersey #).
 2. **Settings → Logins** → add the coach. Choose **Can edit** if she should enter or fix stats too, or **View only** if she should only see and print.
 3. **Schedule** (Season page) → add each game's date, time and who they're playing; several games on one day is fine. After the game, click it and copy in the stats from the paper sheet. Enter jumps to the next box; points add up automatically, and it warns if they don't match the final score.
-4. Click a player to see game-by-game stats, a progress chart with trend line, and early-vs-late season improvement.
-5. **Year-end report** → Print → "Save as PDF": a team summary page plus one page per player.
+4. **At the game on a phone:** open the game → **Live entry (phone)**. Tap who's here, then pick a player and tap Made/Missed, Rebound, Steal and so on. The score adds itself up, Undo fixes mis-taps, and stats are kept on the phone if the gym has no signal, then saved when it's back.
+5. **Practices:** on the Season page, add a practice and tap who came. Attendance shows on the season table, player pages and the report.
+6. Click a player to see game-by-game stats, a progress chart with trend line, early-vs-late season improvement, attendance, and badges (first basket, season highs, 50 points this season…).
+7. **Year-end report** → Print → "Save as PDF": a team summary page plus one page per player.
 
 Each game also has a printable box score. Next season: Settings → Start a new season (can copy the roster).
 

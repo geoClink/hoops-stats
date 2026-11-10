@@ -30,7 +30,7 @@ Then open http://localhost:3000. With no settings it uses a built-in database sa
 ## Using it
 
 1. **Settings** → name the season and team, add players (name + jersey #).
-2. **Settings → Logins** → add the coach. Choose **Can edit** if she should enter or fix stats too, or **View only** if she should only see and print.
+2. **Settings → Logins** → add the coach (**Can edit** or **View only**). For families, choose **Parent** and tick their child: parents only ever see their own child's stats, badges, attendance and report page. Copying the roster into a new season keeps parents linked.
 3. **Schedule** (Season page) → add each game's date, time and who they're playing; several games on one day is fine. After the game, click it and copy in the stats from the paper sheet. Enter jumps to the next box; points add up automatically, and it warns if they don't match the final score.
 4. **At the game on a phone:** open the game → **Live entry (phone)**. Tap who's here, then pick a player and tap Made/Missed, Rebound, Steal and so on. The score adds itself up, Undo fixes mis-taps, and stats are kept on the phone if the gym has no signal, then saved when it's back.
 5. **Practices:** on the Season page, add a practice and tap who came. Attendance shows on the season table, player pages and the report.

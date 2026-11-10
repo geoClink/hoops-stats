@@ -194,3 +194,11 @@ form.card.inline { margin: 0 0 .6rem; padding: .8rem 1rem; }
 .live-actions { display: flex; gap: .5rem; margin-top: 1rem; flex-wrap: wrap; }
 .live-actions #undo { flex: 1; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 600px) { main { padding: 1rem .75rem; } .topbar .who { display: none; } }
+
+/* parent logins */
+.kid-pick { display: flex; flex-wrap: wrap; gap: .3rem 1rem; margin: .4rem 0 .6rem; }
+.kids-edit { display: inline-block; margin-right: .75rem; }
+.kids-edit summary { display: inline; cursor: pointer; }
+.kids-edit[open] { display: block; padding: .5rem 0; }
+a.tile.kid { text-decoration: none; color: var(--ink); }
+a.tile.kid:hover { border-color: var(--accent); }

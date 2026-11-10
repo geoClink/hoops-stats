@@ -14,6 +14,8 @@ const TRACK = [['pts', 'Points'], ['reb', 'Rebounds'], ['ast', 'Assists'], ['stl
 // ---------- helpers ----------
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const isAdmin = () => state.me?.role === 'admin';
+const isParent = () => state.me?.role === 'parent';
+const ROLE_LABEL = { admin: 'Can edit', viewer: 'View only', parent: 'Parent' };
 const pts = l => 2 * l.fg2m + 3 * l.fg3m + l.ftm;
 const pct = (m, a) => a ? Math.round(100 * m / a) + '%' : '–';
 const avg = (n, gp) => gp ? (n / gp).toFixed(1) : '–';
@@ -407,7 +409,7 @@ function viewBoxScore(g, season, players, lineFor) {
         <td>${l.fg2m + l.fg3m}-${l.fg2a + l.fg3a}</td><td>${l.fg3m}-${l.fg3a}</td><td>${l.ftm}-${l.fta}</td>
         <td>${l.reb}</td><td>${l.ast}</td><td>${l.stl}</td><td>${l.blk}</td><td>${l.tov}</td><td>${l.pf}</td></tr>`;
     }).join('')}</tbody>
-    <tfoot><tr><td class="left">Team</td><td>${t.pts}</td><td>${t.fgm}-${t.fga}</td><td>${t.fg3m}-${t.fg3a}</td><td>${t.ftm}-${t.fta}</td>
+    <tfoot ${isParent() ? 'hidden' : ''}><tr><td class="left">Team</td><td>${t.pts}</td><td>${t.fgm}-${t.fga}</td><td>${t.fg3m}-${t.fg3a}</td><td>${t.ftm}-${t.fta}</td>
       <td>${t.reb}</td><td>${t.ast}</td><td>${t.stl}</td><td>${t.blk}</td><td>${t.tov}</td><td>${t.pf}</td></tr></tfoot>
   </table></div>
   ${g.notes ? `<p class="notes"><strong>Notes:</strong> ${esc(g.notes)}</p>` : ''}`;
@@ -480,6 +482,40 @@ function viewPlayer(id) {
   });
 }
 
+// What a parent sees first: their child's season, plus what's coming up.
+function viewParentHome() {
+  if (!state.data) {
+    $app.innerHTML = '<section class="empty"><h1>Welcome!</h1><p>Your player hasn\'t been added to a season yet. Check back soon.</p></section>';
+    return;
+  }
+  const { season, players } = state.data;
+  const upcoming = state.data.games.filter(g => !isPlayed(g)).slice(0, 4);
+  const recent = playedGames().slice(-4).reverse();
+  const row = (g, right) => `<div class="game-row"><span class="date">${fmtDate(g.date)}${g.time ? `<small>${fmtTime(g.time)}</small>` : ''}</span>
+    <span class="opp">vs ${esc(g.opponent || 'Opponent')}</span><span class="score">${right}</span></div>`;
+  $app.innerHTML = `
+  <div class="page-head">
+    <div><h1>${esc(season.team || 'Our team')}</h1><p class="muted">${esc(season.name)}</p></div>
+    <div class="actions">${seasonPicker()}</div>
+  </div>
+  ${players.length === 1
+    ? `<div class="page-head"><h2>${esc(playerLabel(players[0]))}</h2><a class="button" href="#/player/${players[0].id}">All charts &amp; games</a></div>
+       ${playerSection(players[0], { compact: true })}`
+    : `<div class="tiles">${players.map(p => {
+        const t = totals(playerLines(p.id));
+        return `<a class="tile kid" href="#/player/${p.id}"><span class="tile-label">${esc(playerLabel(p))}</span><strong>${t.pts} points</strong>
+          <span class="muted">${avg(t.pts, t.gp)} per game · ${badges(p.id).length} badges</span></a>`;
+      }).join('')}</div>`}
+  <div class="two-col">
+    <div><h2>Coming up</h2><div class="games">${upcoming.map(g => row(g, '')).join('') || '<p class="muted">Nothing on the schedule.</p>'}</div></div>
+    <div><h2>Recent results</h2><div class="games">${recent.map(g => {
+      const r = result(g);
+      return row(g, r ? `<b class="res res-${r}">${r}</b> ${g.team_score}–${g.opp_score}` : '');
+    }).join('') || '<p class="muted">No games yet.</p>'}</div></div>
+  </div>`;
+  bindSeasonPicker();
+}
+
 function viewReport() {
   if (!state.data) return noSeason();
   const { season, players } = state.data;
@@ -489,10 +525,10 @@ function viewReport() {
   const rows = players.map(p => ({ p, t: totals(playerLines(p.id)) }));
   $app.innerHTML = `
   <div class="page-head no-print">
-    <div><h1>Year-end report</h1><p class="muted">A team summary page, then one page per player. Use “Print” and choose “Save as PDF” to keep a copy.</p></div>
+    <div><h1>Year-end report</h1><p class="muted">${isParent() ? 'Your player\'s season, ready to print.' : 'A team summary page, then one page per player.'} Use “Print” and choose “Save as PDF” to keep a copy.</p></div>
     <div class="actions">${seasonPicker()}<button class="primary" onclick="print()">Print report</button></div>
   </div>
-  <section class="report-page">
+  ${isParent() ? '' : `<section class="report-page">
     <div class="report-title"><span class="ball" aria-hidden="true"></span><div><h1>${esc(season.team || 'Our team')}</h1><p>${esc(season.name)} season report</p></div></div>
     <div class="tiles">
       <div class="tile"><span class="tile-label">Games</span><strong>${games.length}</strong></div>
@@ -509,11 +545,15 @@ function viewReport() {
     <table class="stats"><thead><tr><th class="left">Date</th><th class="left">Opponent</th><th>Result</th><th>Score</th></tr></thead>
     <tbody>${games.map(g => `<tr><td class="left">${fmtDate(g.date)}${g.time ? ' · ' + fmtTime(g.time) : ''}</td><td class="left">${esc(g.opponent)}</td><td>${result(g) || '–'}</td>
       <td>${g.team_score != null && g.opp_score != null ? `${g.team_score}–${g.opp_score}` : '–'}</td></tr>`).join('')}</tbody></table>
-  </section>
+  </section>`}
   ${players.map(p => `<section class="report-page">
     <div class="report-title"><span class="ball" aria-hidden="true"></span><div><h1>${esc(playerLabel(p))}</h1><p>${esc(season.team)} · ${esc(season.name)}</p></div></div>
     ${playerSection(p, { compact: true })}</section>`).join('')}`;
   bindSeasonPicker();
+}
+
+function kidPicker(selected) {
+  return `<div class="kid-pick">${state.data.players.map(p => `<label class="check"><input type="checkbox" class="kid-box" value="${p.id}" ${selected.includes(p.id) ? 'checked' : ''}> ${esc(playerLabel(p))}</label>`).join('')}</div>`;
 }
 
 async function viewSettings() {
@@ -554,14 +594,21 @@ async function viewSettings() {
     </section>
     <section class="card">
       <h2>Logins</h2>
-      <p class="muted small">Give the coach a <b>view-only</b> login: she can see and print everything but can't change stats.</p>
-      <table class="roster"><tbody>${users.map(u => `<tr><td>${esc(u.username)}</td><td>${u.role === 'admin' ? 'Can edit' : 'View only'}</td>
-        <td>${u.username === state.me.username ? '<span class="muted">you</span>' : `<button class="link danger del-u" data-id="${u.id}">Remove</button>`}</td></tr>`).join('')}</tbody></table>
-      <form id="addUser" class="inline">
-        <label>Username <input name="username" required autocomplete="off"></label>
-        <label>Password <input name="password" type="password" minlength="8" required autocomplete="new-password"></label>
-        <label>Access <select name="role"><option value="viewer">View only</option><option value="admin">Can edit</option></select></label>
-        <button class="primary">Add login</button>
+      <p class="muted small"><b>Can edit</b>: enters and fixes stats. <b>View only</b>: sees and prints everything. <b>Parent</b>: sees only their own child's stats, badges and attendance.</p>
+      <table class="roster"><tbody>${users.map(u => {
+        const kids = (u.player_ids || []).map(id => d?.players.find(p => p.id === id)).filter(Boolean);
+        return `<tr><td>${esc(u.username)}</td><td>${ROLE_LABEL[u.role] || u.role}${u.role === 'parent' ? `: ${kids.map(k => esc(k.name)).join(', ') || '<span class="muted">no players this season</span>'}` : ''}</td>
+        <td>${u.role === 'parent' && d ? `<details class="kids-edit"><summary class="link">Change players</summary>${kidPicker(u.player_ids)}<button type="button" class="save-kids" data-id="${u.id}">Save</button></details>` : ''}
+          ${u.username === state.me.username ? '<span class="muted">you</span>' : `<button class="link danger del-u" data-id="${u.id}">Remove</button>`}</td></tr>`;
+      }).join('')}</tbody></table>
+      <form id="addUser">
+        <div class="inline">
+          <label>Username <input name="username" required autocomplete="off"></label>
+          <label>Password <input name="password" type="password" minlength="8" required autocomplete="new-password"></label>
+          <label>Access <select name="role" id="roleSel"><option value="viewer">View only</option><option value="admin">Can edit</option><option value="parent">Parent</option></select></label>
+          <button class="primary">Add login</button>
+        </div>
+        <div id="kidPick" hidden><p class="muted small">Which player(s) is this parent's child?</p>${d ? kidPicker([]) : ''}</div>
       </form>
     </section>
   </div>` : ''}
@@ -583,7 +630,14 @@ async function viewSettings() {
     const r = await api('/seasons', { method: 'POST', body: { ...f, copyPlayersFrom: f.copy ? state.seasonId : null } });
     state.seasonId = r.id; localStorage.seasonId = r.id; await refresh('Season created');
   });
-  on('addUser', async f => { await api('/users', { method: 'POST', body: f }); await refresh('Login added'); });
+  const pickedKids = el => [...el.querySelectorAll('.kid-box:checked')].map(c => Number(c.value));
+  const roleSel = document.getElementById('roleSel');
+  if (roleSel) roleSel.onchange = () => { document.getElementById('kidPick').hidden = roleSel.value !== 'parent'; };
+  on('addUser', async (f, form) => { await api('/users', { method: 'POST', body: { ...f, player_ids: pickedKids(form) } }); await refresh('Login added'); });
+  $app.querySelectorAll('.save-kids').forEach(b => b.onclick = async () => {
+    try { await api(`/users/${b.dataset.id}`, { method: 'PUT', body: { player_ids: pickedKids(b.closest('details')) } }); await refresh('Players updated'); }
+    catch (err) { toast(err.message, true); }
+  });
   on('pw', async (f, form) => { await api('/password', { method: 'POST', body: f }); form.reset(); toast('Password changed'); });
   $app.querySelectorAll('.save-p').forEach(b => b.onclick = async () => {
     const tr = b.closest('tr');
@@ -803,7 +857,8 @@ async function boot() {
   const r = await api('/me');
   state.me = r.user;
   if (!state.me) return viewAuth(r.needsSetup);
-  document.getElementById('who').textContent = state.me.username + (isAdmin() ? '' : ' (view only)');
+  document.getElementById('who').textContent = state.me.username + (state.me.role === 'viewer' ? ' (view only)' : isParent() ? ' (parent)' : '');
+  document.querySelector('.topbar nav a[href="#/"]').textContent = isParent() ? 'My player' : 'Season';
   await loadSeasons(); await loadSeason();
   route();
 }
@@ -824,6 +879,7 @@ function route() {
   if (page === 'practice') return viewPractice(id);
   if (page === 'report') return viewReport();
   if (page === 'settings') return viewSettings();
+  if (isParent()) return viewParentHome();
   viewSeason();
 }
 window.addEventListener('hashchange', route);
